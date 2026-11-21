@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="用 Claude Code 開發 LINE 訊息與相簿整理工具的過程、技術判斷與踩過的坑（已去識別化）。">
+<title>LINE 整理工具開發紀錄</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+html{color-scheme:light}body{margin:0}img{max-width:100%}
+/* Layout: single reading column (~70ch) with a sticky chapter rail on wide screens; log-book feel — each finding is an entry card with 現象 / 原因 / 解法 */
+:root{
+  --bg:#f5f7f6; --surface:#ffffff; --ink:#17211d; --mute:#5d6b65; --line:#dde4e0;
+  --accent:#0d8a57; --accent-soft:#e2f3ea; --warn:#b4560f; --warn-soft:#fbeee2; --code-bg:#eef2f0;
+  --f-body:"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",Consolas,"Microsoft JhengHei",monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111715; --surface:#18201d; --ink:#e6ece9; --mute:#9aa8a1; --line:#2a3531;
+  --accent:#3ccf8e; --accent-soft:#16352a; --warn:#f0a35e; --warn-soft:#3a2717; --code-bg:#1f2926; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111715; --surface:#18201d; --ink:#e6ece9; --mute:#9aa8a1; --line:#2a3531;
+  --accent:#3ccf8e; --accent-soft:#16352a; --warn:#f0a35e; --warn-soft:#3a2717; --code-bg:#1f2926; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.8 var(--f-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 64px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:210px minmax(0,1fr);gap:48px}
+header.top{max-width:1120px;margin:0 auto;padding-block:48px 28px;border-bottom:1px solid var(--line);margin-bottom:36px}
+.eyebrow{font:600 12px/1 var(--f-mono);letter-spacing:.12em;color:var(--accent);text-transform:uppercase}
+h1{font-size:clamp(30px,5vw,46px);font-weight:900;line-height:1.2;margin:12px 0 12px;text-wrap:balance}
+.lede{color:var(--mute);max-width:62ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{font:500 13px/1 var(--f-mono);padding:7px 10px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--mute)}
+nav.rail{position:sticky;top:max(24px,env(safe-area-inset-top,0px));align-self:start;font-size:14px}
+nav.rail ol{list-style:none;margin:0;padding:0;display:grid;gap:2px;counter-reset:c}
+nav.rail li{counter-increment:c}
+nav.rail a{display:flex;gap:10px;padding:6px 8px;border-radius:6px;color:var(--mute);text-decoration:none}
+nav.rail a::before{content:counter(c,decimal-leading-zero);font-family:var(--f-mono);color:var(--accent)}
+nav.rail a:hover{background:var(--surface);color:var(--ink)}
+main{min-width:0;max-width:74ch}
+section{margin-bottom:56px;scroll-margin-top:24px}
+h2{font-size:24px;font-weight:900;margin:0 0 16px;text-wrap:balance;display:flex;gap:12px;align-items:baseline}
+h2 .no{font:600 14px var(--f-mono);color:var(--accent)}
+h3{font-size:17px;margin:0 0 6px}
+p{margin:0 0 14px}
+.muted{color:var(--mute)}
+code{font:14px var(--f-mono);background:var(--code-bg);padding:1px 6px;border-radius:4px}
+/* timeline of requirement rounds */
+.rounds{display:grid;gap:0;border-left:2px solid var(--line);margin-left:6px}
+.round{position:relative;padding:0 0 22px 24px}
+.round::before{content:"";position:absolute;left:-7px;top:8px;width:12px;height:12px;border-radius:50%;background:var(--surface);border:2px solid var(--accent)}
+.round .q{font-weight:700}
+.round .a{color:var(--mute);font-size:15px}
+/* tables */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface);margin-bottom:14px}
+table{border-collapse:collapse;width:100%;font-size:15px;min-width:560px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:700;color:var(--mute);font-size:13px;letter-spacing:.04em;background:var(--code-bg)}
+tr:last-child td{border-bottom:0}
+td.pick{color:var(--accent);font-weight:700;white-space:nowrap}
+/* pitfall entries */
+.entries{display:grid;gap:14px}
+.entry{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.entry header{display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px}
+.tag{font:600 12px/1 var(--f-mono);padding:5px 8px;border-radius:4px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.tag.w{background:var(--warn-soft);color:var(--warn)}
+.entry dl{display:grid;grid-template-columns:44px minmax(0,1fr);gap:4px 10px;margin:0;font-size:15px}
+.entry dt{color:var(--mute);font-weight:700}
+.entry dd{margin:0}
+/* architecture */
+pre.mermaid{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;overflow-x:auto}
+.mods{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px}
+.mod{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--surface);font-size:14px}
+.mod b{font-family:var(--f-mono);font-size:13px;display:block;margin-bottom:2px;color:var(--accent)}
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.stat{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--surface)}
+.stat .v{font:700 22px var(--f-mono);font-variant-numeric:tabular-nums}
+.stat .k{font-size:13px;color:var(--mute)}
+/* prompts */
+.prompt{background:var(--code-bg);border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:15px}
+.prompt .step{font:600 12px var(--f-mono);color:var(--accent);display:block;margin-bottom:4px}
+ul.clean{margin:0 0 14px;padding-left:1.2em}
+ul.clean li{margin-bottom:6px}
+.note{border-left:3px solid var(--warn);background:var(--warn-soft);padding:10px 14px;border-radius:0 8px 8px 0;font-size:15px;margin-bottom:14px}
+/* usage flow */
+.flow{list-style:none;margin:0 0 18px;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;counter-reset:s}
+.flow li{counter-increment:s;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px 14px 56px;position:relative;font-size:15px}
+.flow li::before{content:counter(s);position:absolute;left:14px;top:14px;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--surface);font:700 14px/28px var(--f-mono);text-align:center}
+.flow b{display:block;font-size:16px;margin-bottom:2px}
+.flow .hint{color:var(--mute);font-size:14px}
+.tree{font:14px/1.7 var(--f-mono);background:var(--code-bg);border-radius:8px;padding:12px 14px;overflow-x:auto;white-space:pre;margin:0 0 14px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;align-items:start}
+.two h3{margin-bottom:8px}
+.kw{width:100%;border-collapse:collapse;font-size:15px}
+.kw td{padding:6px 8px;border-bottom:1px solid var(--line)}
+.kw td:first-child{font-family:var(--f-mono);white-space:nowrap;color:var(--accent)}
+/* screenshots */
+figure.shot{margin:0 0 22px}
+.shot .frame{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.shot .frame.tall{max-height:720px;overflow-y:auto}
+.shot img{display:block;width:100%;height:auto;max-width:100%}
+.shot figcaption{font-size:14px;color:var(--mute);margin-top:8px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.legend{list-style:none;margin:10px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px 14px;font-size:14px}
+.legend b{color:var(--accent);font-family:var(--f-mono);margin-right:4px}
+.fake{font:600 12px/1 var(--f-mono);padding:5px 8px;border-radius:4px;background:var(--warn-soft);color:var(--warn);white-space:nowrap}
+footer{max-width:1120px;margin:24px auto 0;color:var(--mute);font-size:13px;border-top:1px solid var(--line);padding-top:16px}
+@media (max-width:860px){.wrap{grid-template-columns:minmax(0,1fr);gap:0} nav.rail{display:none} header.top{padding-block:32px 20px}}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="eyebrow">Dev log · 去識別化版本</div>
+  <h1>LINE 訊息與相簿整理工具：開發紀錄</h1>
+  <p class="lede">一個使用者用中文對 Claude Code 描述需求，經過四輪對話，做出一個 Windows 視窗工具：用關鍵字找聯絡人，篩選文字訊息、相簿與照片裡的文字，一鍵下載並整理成報告。這份紀錄寫下過程中的判斷和踩過的坑。</p>
+  <div class="meta">
+    <span class="chip">Windows 11</span><span class="chip">LINE 電腦版 26.6</span><span class="chip">Python 3.14</span>
+    <span class="chip">UI Automation</span><span class="chip">RapidOCR</span><span class="chip">tkinter</span>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="rail" aria-label="章節">
+  <ol>
+    <li><a href="#need">需求怎麼長出來</a></li>
+    <li><a href="#howto">怎麼使用</a></li>
+    <li><a href="#route">技術路線</a></li>
+    <li><a href="#probe">探索 LINE 介面</a></li>
+    <li><a href="#pitfalls">踩過的坑</a></li>
+    <li><a href="#arch">程式架構</a></li>
+    <li><a href="#test">測試與結果</a></li>
+    <li><a href="#safety">安全設計</a></li>
+    <li><a href="#replay">想照著做的人</a></li>
+    <li><a href="#limits">限制與後續</a></li>
+  </ol>
+</nav>
+
+<main>
+<section id="need">
+  <h2><span class="no">01</span>需求怎麼長出來</h2>
+  <p>一開始只是「想整理 LINE 的訊息和相簿」。需求在對話中逐輪變得具體，每一輪都讓工具多一層篩選。</p>
+  <div class="rounds">
+    <div class="round"><div class="q">第 1 輪：一鍵下載全部文字和相簿，也能指定聯絡人</div><div class="a">Claude 先說明 LINE 沒有官方批次匯出和個人聊天 API，提出三種方案，建議「電腦版＋自動化＋本機整理」。</div></div>
+    <div class="round"><div class="q">第 2 輪：用關鍵字搜尋聯絡人，符合的都下載</div><div class="a">加入聯絡人關鍵字、確認清單、勾選後下載的流程。</div></div>
+    <div class="round"><div class="q">第 3 輪：訊息和相簿也要能用關鍵字篩選</div><div class="a">定出三層篩選：聯絡人 → 訊息 → 相簿，並規劃照片內文字辨識。也說清楚技術限制：LINE 只能整份匯出，所以要先下載再篩選。</div></div>
+    <div class="round"><div class="q">第 4 輪：有電腦版、要視窗介面、要 OCR</div><div class="a">開始實作。實際探索 LINE 介面，寫出解析器、報告、OCR、自動化和 GUI，在真實環境測完整流程。</div></div>
+  </div>
+  <p class="muted">心得：先用表格把選項和限制講清楚，讓使用者自己選，比直接開始寫程式省事。第 3 輪先說明「LINE 只能匯出整個聊天室」，後面就不用重做。</p>
+</section>
+
+<section id="howto">
+  <h2><span class="no">02</span>怎麼使用</h2>
+  <p>做好的工具是一個視窗程式。整個使用流程只有六步：</p>
+  <ol class="flow">
+    <li><b>開啟 LINE</b>打開 LINE 電腦版並登入。<div class="hint">程式會操作這個視窗</div></li>
+    <li><b>啟動工具</b>雙擊 <code>啟動LINE整理工具.bat</code>。<div class="hint">第一次會自動安裝套件，約 1～2 分鐘</div></li>
+    <li><b>找聯絡人</b>輸入關鍵字，按「搜尋聯絡人」，在清單勾選要下載的聊天室。<div class="hint">也可以按「列出全部聊天室」</div></li>
+    <li><b>設定要下載什麼</b>填訊息關鍵字、日期、相簿名稱；需要時勾選照片文字辨識。<div class="hint">關鍵字留空就是全部下載</div></li>
+    <li><b>開始，放開滑鼠</b>按「▶ 開始下載並整理」，程式會自己操作 LINE。<div class="hint">按 Esc 可以隨時停止</div></li>
+    <li><b>看報告</b>完成後打開「搜尋報告.html」，關鍵字會以黃色標示。<div class="hint">也有 Excel 版和各聊天室的 txt</div></li>
+  </ol>
+  <h3>操作畫面</h3>
+  <figure class="shot">
+    <div class="frame"><img src="img/app.png" width="1056" height="904" alt="工具視窗：上方是聯絡人搜尋與勾選清單，中間左右是文字訊息與相簿的篩選設定，下方是儲存位置、開始按鈕與執行紀錄"></div>
+    <figcaption><span>完成一次下載後的工具視窗。</span><span class="fake">畫面中的聯絡人、群組與路徑皆為虛構</span></figcaption>
+    <ul class="legend">
+      <li><b>①</b>輸入聯絡人關鍵字、搜尋，勾選要下載的聊天室；⚠ 表示有未讀訊息</li>
+      <li><b>②</b>文字訊息的關鍵字、發言者、日期範圍與前後文</li>
+      <li><b>③</b>相簿名稱關鍵字，以及照片文字辨識（OCR）</li>
+      <li><b>④</b>儲存位置、開始與停止；下方顯示執行進度</li>
+    </ul>
+  </figure>
+  <h3>報告畫面</h3>
+  <figure class="shot">
+    <div class="frame tall"><img src="img/report.png" width="1280" height="1816" alt="搜尋報告網頁：左側是聊天室目錄與再篩選框，右側依聊天室列出符合的訊息，關鍵字以黃色標示，最下方是照片文字符合的相簿照片"></div>
+    <figcaption><span>完成後打開的「搜尋報告.html」。符合的訊息底色為黃色，關鍵字另外加亮；灰字是前後文。最下方是照片文字符合「報價、收據」的照片。框內可捲動，<a href="img/report.png" target="_blank" rel="noopener">開啟原圖</a>。</span><span class="fake">聊天內容與照片皆為虛構</span></figcaption>
+  </figure>
+  <div class="two">
+    <div>
+      <h3>關鍵字怎麼寫</h3>
+      <table class="kw">
+        <tr><td>報價, 合約</td><td>含「報價」或「合約」</td></tr>
+        <tr><td>合約 + 簽名</td><td>同時有兩個字</td></tr>
+        <tr><td>合約 -取消</td><td>有「合約」但沒有「取消」</td></tr>
+      </table>
+      <p class="muted" style="margin-top:8px">聯絡人、訊息、相簿名稱、照片文字都用同一套寫法，不分繁簡。</p>
+    </div>
+    <div>
+      <h3>結果長這樣</h3>
+      <div class="tree">LINE搜尋結果_日期時間/
+├─ 搜尋報告.html
+├─ 搜尋報告.xlsx
+└─ 王小明/
+   ├─ 符合訊息.txt
+   └─ 相簿/旅遊/旅遊_001.jpg</div>
+    </div>
+  </div>
+  <div class="note">打開有未讀訊息的聊天室，對方會看到「已讀」。清單會用 ⚠ 標出這類聊天室，也可以勾選「略過有未讀訊息的聊天室」。</div>
+</section>
+
+<section id="route">
+  <h2><span class="no">03</span>技術路線</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>方案</th><th>做法</th><th>結論</th></tr></thead>
+    <tbody>
+      <tr><td>官方手動匯出</td><td>每個聊天室按「儲存聊天」、每本相簿手動下載</td><td>可行但不能一鍵</td></tr>
+      <tr><td>第三方付費軟體</td><td>讀手機備份</td><td>聊天資料要交給第三方，不採用</td></tr>
+      <tr><td>讀取本機資料庫</td><td>直接讀 LINE 的資料檔</td><td>資料有加密，不嘗試破解</td></tr>
+      <tr><td class="pick">電腦版自動化＋本機整理</td><td>用 Windows UI Automation 操作 LINE 的官方功能，下載後在本機篩選</td><td>採用：只用官方功能，資料不離開電腦</td></tr>
+    </tbody>
+  </table></div>
+  <p>OCR 選了 <code>rapidocr</code>（ONNX，離線、可 pip 安裝、支援中文）。比對文字時用 <code>zhconv</code> 把繁簡統一，因為辨識結果常是簡體字。</p>
+</section>
+
+<section id="probe">
+  <h2><span class="no">04</span>探索 LINE 介面</h2>
+  <p>寫自動化前，先用小腳本把 LINE 視窗的 UI Automation 樹印出來，一層層確認「哪些東西讀得到、哪些按得到」。</p>
+  <div class="tbl"><table>
+    <thead><tr><th>目標</th><th>看到的結構</th><th>能不能用</th></tr></thead>
+    <tbody>
+      <tr><td>聊天室清單</td><td>每個項目是 Button，名稱格式為 <code>名稱, [N人,] [未讀數,] 預覽, 日期</code>，全部項目一次讀得到</td><td>可以，免捲動</td></tr>
+      <tr><td>搜尋框</td><td>Edit「搜尋聊天和訊息」，支援 ValuePattern</td><td>可以直接填字</td></tr>
+      <tr><td>搜尋結果</td><td>分成「聊天」、「訊息」兩區，各有「顯示更多」</td><td>「顯示更多」要真的點</td></tr>
+      <tr><td>聊天室選單</td><td>「其他功能」→ 相簿、照片・影片、儲存聊天…</td><td>Invoke 可觸發</td></tr>
+      <tr><td>相簿清單</td><td>項目沒有名稱，只有位置</td><td>要點標題，靠座標</td></tr>
+      <tr><td>相簿內頁</td><td>標題、張數是可讀的 Text；選單有「儲存全部」</td><td>可以</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">LINE 視窗常被其他視窗蓋住，所以截圖改用 Win32 <code>PrintWindow</code>，就算視窗被擋住也能拍到。</p>
+</section>
+
+<section id="pitfalls">
+  <h2><span class="no">05</span>踩過的坑</h2>
+  <div class="entries">
+    <article class="entry"><header><h3>滑鼠點擊落在別的視窗</h3><span class="tag w">嚴重</span></header>
+      <dl><dt>現象</dt><dd>第一次點聊天室，開到的是另一個群組；點「儲存聊天」卻打開了照片檢視器。</dd>
+      <dt>原因</dt><dd>LINE 被 Claude 視窗蓋住，座標點擊落在最上層的視窗。</dd>
+      <dt>解法</dt><dd>能用 Invoke 的地方一律不用滑鼠。非點不可時，先把 LINE 帶到前景，再用 <code>WindowFromPoint</code> 確認那個位置真的是 LINE，不是就不點。</dd></dl></article>
+    <article class="entry"><header><h3>背景送點擊沒有反應</h3><span class="tag">已解</span></header>
+      <dl><dt>現象</dt><dd>用 <code>PostMessage</code> 對視窗送滑鼠訊息，LINE 完全不理。</dd>
+      <dt>原因</dt><dd>LINE 是 Qt 程式，忽略這類訊息。</dd>
+      <dt>解法</dt><dd>改用上面的「帶到前景＋位置檢查＋真實點擊」，執行時請使用者不要動滑鼠，按 Esc 可停止。</dd></dl></article>
+    <article class="entry"><header><h3>好友／群組分頁看起來有切，實際沒過濾</h3><span class="tag">已解</span></header>
+      <dl><dt>現象</dt><dd>分頁回報「已選取」，但清單數量不變。</dd>
+      <dt>解法</dt><dd>不靠分頁，改用名稱後面的「N人」自己判斷是不是群組。</dd></dl></article>
+    <article class="entry"><header><h3>以為存檔不會跳視窗</h3><span class="tag w">誤判</span></header>
+      <dl><dt>現象</dt><dd>前兩次「儲存聊天」和「儲存全部」都成功了，看似 LINE 會直接存到「文件」資料夾。</dd>
+      <dt>原因</dt><dd>其實會跳出「另存新檔」或「選擇資料夾」視窗，是使用者在旁邊幫忙按了存檔。</dd>
+      <dt>解法</dt><dd>程式自動填路徑（檔名欄 AutomationId <code>1001</code>，資料夾欄 <code>1152</code>，確定鈕 <code>1</code>）。測試前要先請使用者不要幫忙按。</dd></dl></article>
+    <article class="entry"><header><h3>點相簿封面會開照片，不是開相簿</h3><span class="tag">已解</span></header>
+      <dl><dt>解法</dt><dd>改點封面下方的相簿標題。標題位置由「項目頂端＋封面寬＋37px」算出，因為最後一本相簿下面多了一段空白，用「底部往上」算會點到空白。</dd></dl></article>
+    <article class="entry"><header><h3>電腦版聊天記錄用空白分隔</h3><span class="tag">已解</span></header>
+      <dl><dt>現象</dt><dd>格式是 <code>20:53 王小明 內容</code>，但名稱本身也可能有空白。</dd>
+      <dt>解法</dt><dd>先從「傳送圖片／貼圖」和「已加入群組」這類行收集真正的名稱，再用最長比對切開。另外用時間倒退來判斷多行訊息裡像「09:00 開會」這種文字。</dd></dl></article>
+    <article class="entry"><header><h3>套件裝到了看不到的地方</h3><span class="tag">已解</span></header>
+      <dl><dt>現象</dt><dd>在 Claude 裡 <code>pip install --user</code> 的套件，落在桌面版的虛擬化 AppData，使用者自己雙擊執行時找不到。</dd>
+      <dt>解法</dt><dd>啟動檔第一次執行時先檢查套件，缺少的就自動安裝。</dd></dl></article>
+    <article class="entry"><header><h3>打開聊天室＝已讀</h3><span class="tag w">副作用</span></header>
+      <dl><dt>說明</dt><dd>自動化要打開聊天室才能匯出，有未讀訊息時對方會看到「已讀」。</dd>
+      <dt>解法</dt><dd>清單標出未讀數，開始前再提醒一次，並提供「略過有未讀訊息的聊天室」選項。</dd></dl></article>
+  </div>
+</section>
+
+<section id="arch">
+  <h2><span class="no">06</span>程式架構</h2>
+  <pre class="mermaid">
+flowchart LR
+  A[app.py<br/>視窗介面] --> B[pipeline.py<br/>流程串接]
+  B --> C[line_auto.py<br/>操作 LINE]
+  C -->|完整聊天記錄 txt| D[chat_parser.py<br/>解析＋篩選]
+  C -->|相簿照片| E[album_tools.py<br/>改名、去重、OCR]
+  D --> F[report.py<br/>txt / HTML / Excel]
+  E --> F
+  </pre>
+  <div class="mods">
+    <div class="mod"><b>textnorm.py</b>關鍵字語法：逗號＝或、空白或 +＝且、-＝排除；比對時統一全半形與繁簡。</div>
+    <div class="mod"><b>line_auto.py</b>只允許觸發白名單選單項目：儲存聊天、相簿、儲存全部。</div>
+    <div class="mod"><b>pipeline.py</b>先跑完所有 LINE 操作，再做 OCR 和報告，讓使用者早點拿回滑鼠。</div>
+    <div class="mod"><b>report.py</b>每個聊天室一份 txt，總表 HTML（標黃、可再篩選）和 Excel（含 OCR 文字）。</div>
+  </div>
+</section>
+
+<section id="test">
+  <h2><span class="no">07</span>測試與結果</h2>
+  <p>先用自己的「Keep筆記」測試匯出（不會讓任何人看到已讀），再用一個沒有未讀訊息的群組測相簿，最後跑完整流程。</p>
+  <div class="stats">
+    <div class="stat"><div class="v">≈10 秒</div><div class="k">匯出一個聊天室</div></div>
+    <div class="stat"><div class="v">5,730 則</div><div class="k">單一群組解析量</div></div>
+    <div class="stat"><div class="v">≈2 秒</div><div class="k">每張照片 OCR</div></div>
+    <div class="stat"><div class="v">12 秒</div><div class="k">列出群組內 2 本相簿</div></div>
+  </div>
+  <p>使用者第一次實跑 10 個聊天室，報告正常。有幾個聊天室顯示「相簿共 0 本」，還沒確認是真的沒有相簿，還是沒點到，列為待查。</p>
+</section>
+
+<section id="safety">
+  <h2><span class="no">08</span>安全設計</h2>
+  <ul class="clean">
+    <li>選單項目白名單：程式不會碰「退出群組」、「刪除相簿」、「檢舉」等項目。</li>
+    <li>點擊前檢查位置：不是 LINE 視窗就不點，避免誤觸其他程式。</li>
+    <li>Esc 可隨時停止；已下載的部分照常整理。</li>
+    <li>所有處理都在本機完成，不會上傳任何聊天內容或照片。</li>
+    <li>開發時產生的測試檔都放在暫存區；誤存到「文件」資料夾的測試檔也已經移走。</li>
+  </ul>
+</section>
+
+<section id="replay">
+  <h2><span class="no">09</span>想照著做的人</h2>
+  <p>可以照這個順序對 Claude Code 說，每一步確認沒問題再往下：</p>
+  <div class="prompt"><span class="step">STEP 1 · 釐清方案</span>我想整理 LINE 的訊息和相簿，請建議方案，要能一鍵下載，也能指定聯絡人。</div>
+  <div class="prompt"><span class="step">STEP 2 · 加上篩選</span>聯絡人、文字訊息、相簿都要能用關鍵字搜尋，只下載符合的再整理。</div>
+  <div class="prompt"><span class="step">STEP 3 · 指定形式</span>我有安裝電腦版，要視窗介面，也要 OCR。</div>
+  <div class="prompt"><span class="step">STEP 4 · 實機測試</span>請先用「Keep筆記」測試匯出，測試時我不會去按任何對話框。</div>
+  <div class="note">測試期間 LINE 會跳出存檔視窗，請讓程式自己處理，不要幫忙按，否則無法確認自動化真的有效。</div>
+  <p>也可以直接拿交接包：用 Claude Code 打開資料夾，請它先讀 <code>CLAUDE.md</code>，就能接續修改。</p>
+</section>
+
+<section id="limits">
+  <h2><span class="no">10</span>限制與後續</h2>
+  <ul class="clean">
+    <li>只支援 Windows 版 LINE、繁體中文介面；LINE 改版後可能要重新探索介面。</li>
+    <li>聊天室裡直接傳、沒放進相簿的照片還沒有支援，而且這類照片過一段時間就會過期。</li>
+    <li>螢幕縮放 100% 以外的環境還沒實測。</li>
+    <li>部分群組相簿數為 0 的原因待確認。</li>
+    <li>可以打包成 .exe，讓沒有 Python 的電腦也能用。</li>
+  </ul>
+</section>
+</main>
+</div>
+<footer>本頁已移除所有真實人名、群組名稱、訊息內容與照片。截圖使用虛構的聊天記錄與合成照片重新產生，範例名稱「王小明」等皆為虛構。</footer>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral" });
+</script>
+</body>
+</html>
